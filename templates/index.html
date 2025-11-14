@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador Sintáctico</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900">
+<div id="root"></div>
+<script type="text/babel">
+    const { useState } = React;
+    const API_URL = '/api';
+
+    function AnalizadorSintactico() {
+        const [gramatica, setGramatica] = useState(null);
+        const [noTerminales, setNoTerminales] = useState('');
+        const [terminales, setTerminales] = useState('');
+        const [simboloInicial, setSimbloInicial] = useState('');
+        const [producciones, setProducciones] = useState('');
+        const [tipo, setTipo] = useState('Tipo 2');
+        const [cadenaEvaluar, setCadenaEvaluar] = useState('');
+        const [resultadoEvaluacion, setResultadoEvaluacion] = useState(null);
+        const [cadenasGeneradas, setCadenasGeneradas] = useState(null);
+        const [mensaje, setMensaje] = useState(null);
+        const [activeTab, setActiveTab] = useState('definir');
+
+        const mostrarMensaje = (texto, tipo = 'success') => {
+            setMensaje({ texto, tipo });
+            setTimeout(() => setMensaje(null), 3000);
+        };
+
+        const definirGramatica = async () => {
+            try {
+                const noTerminalesArray = noTerminales.split(',').map(s => s.trim()).filter(s => s);
+                const terminalesArray = terminales.split(',').map(s => s.trim()).filter(s => s);
+
+                if (!noTerminalesArray.length || !terminalesArray.length || !simboloInicial.trim() || !producciones.trim()) {
+                    mostrarMensaje('Por favor complete todos los campos', 'error');
+                    return;
+                }
+
+                const produccionesObj = {};
+                const lineas = producciones.split('\n').filter(l => l.trim());
+
+                for (const linea of lineas) {
+                    if (linea.includes('->')) {
+                        const [izq, der] = linea.split('->');
+                        const noTerminal = izq.trim();
+                        const derivaciones = der.split('|').map(d => d.trim()).filter(d => d);
+
+                        if (produccionesObj[noTerminal]) {
+                            produccionesObj[noTerminal].push(...derivaciones);
+                        } else {
+                            produccionesObj[noTerminal] = derivaciones;
+                        }
+                    }
+                }
+
+                if (Object.keys(produccionesObj).length === 0) {
+                    mostrarMensaje('No se encontraron producciones validas. Use el formato: S -> aSa | bSb', 'error');
+                    return;
+                }
+
+                const response = await fetch(`${API_URL}/gramatica`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        no_terminales: noTerminalesArray,
+                        terminales: terminalesArray,
+                        producciones: produccionesObj,
+                        simbolo_inicial: simboloInicial.trim(),
+                        tipo: tipo
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    setGramatica(data.gramatica);
+                    mostrarMensaje('Gramatica definida correctamente');
+                } else {
+                    mostrarMensaje(data.detail || 'Error al definir gramatica', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                mostrarMensaje('Error de conexion con el servidor', 'error');
+            }
+        };
+
+        const cargarArchivo = async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_URL}/cargar`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    setGramatica(data.gramatica);
+                    setNoTerminales(data.gramatica.no_terminales.join(', '));
+                    setTerminales(data.gramatica.terminales.join(', '));
+                    setSimbloInicial(data.gramatica.simbolo_inicial);
+                    setTipo(data.gramatica.tipo);
+
+                    let prodTexto = '';
+                    for (const [nt, prods] of Object.entries(data.gramatica.producciones)) {
+                        prodTexto += `${nt} -> ${prods.join(' | ')}\n`;
+                    }
+                    setProducciones(prodTexto.trim());
+
+                    mostrarMensaje('Gramatica cargada correctamente');
+                } else {
+                    mostrarMensaje(data.detail || 'Error al cargar archivo', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                mostrarMensaje('Error de conexion con el servidor', 'error');
+            }
+
+            event.target.value = '';
+        };
+
+        const descargarGramatica = async () => {
+            try {
+                const response = await fetch(`${API_URL}/descargar`);
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'gramatica.json';
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    mostrarMensaje('Gramatica descargada correctamente');
+                } else {
+                    mostrarMensaje('No hay gramatica definida', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                mostrarMensaje('Error de conexion con el servidor', 'error');
+            }
+        };
+
+        const evaluarCadena = async () => {
+            try {
+                const response = await fetch(`${API_URL}/evaluar`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cadena: cadenaEvaluar })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    setResultadoEvaluacion(data);
+                    mostrarMensaje(data.mensaje, data.aceptada ? 'success' : 'error');
+                } else {
+                    mostrarMensaje(data.detail || 'Error al evaluar cadena', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                mostrarMensaje('Error de conexion con el servidor', 'error');
+            }
+        };
+
+        const generarCadenas = async () => {
+            try {
+                const response = await fetch(`${API_URL}/generar`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ n: 10 })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    setCadenasGeneradas(data.cadenas);
+                    mostrarMensaje(`${data.total_generadas} cadenas generadas`);
+                } else {
+                    mostrarMensaje(data.detail || 'Error al generar cadenas', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                mostrarMensaje('Error de conexion con el servidor', 'error');
+            }
+        };
+
+        const eliminarGramatica = async () => {
+            try {
+                const response = await fetch(`${API_URL}/gramatica`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    setGramatica(null);
+                    setResultadoEvaluacion(null);
+                    setCadenasGeneradas(null);
+                    setNoTerminales('');
+                    setTerminales('');
+                    setSimbloInicial('');
+                    setProducciones('');
+                    mostrarMensaje('Gramatica eliminada correctamente');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                mostrarMensaje('Error de conexion con el servidor', 'error');
+            }
+        };
+
+        const renderArbol = (nodo, nivel = 0) => {
+            if (!nodo) return null;
+
+            return (
+                <div key={`${nodo.simbolo}-${nivel}-${Math.random()}`} style={{ marginLeft: `${nivel * 20}px` }}>
+                    <div className="flex items-center gap-2 py-1">
+                        <span className="text-blue-400 font-mono">{nodo.simbolo}</span>
+                    </div>
+                    {nodo.hijos && nodo.hijos.map((hijo, idx) => renderArbol(hijo, nivel + 1))}
+                </div>
+            );
+        };
+
+        return (
+            <div className="min-h-screen bg-gray-900 p-6">
+                <div className="max-w-6xl mx-auto">
+                    <div className="bg-gray-800 rounded-lg shadow-2xl p-6 mb-6 border border-gray-700">
+                        <h1 className="text-3xl font-bold text-white mb-2">
+                            Analizador Sintactico
+                        </h1>
+                        <p className="text-gray-400">Parser de Gramaticas Tipo 2 y Tipo 3</p>
+                    </div>
+
+                    {mensaje && (
+                        <div className={`mb-6 p-4 rounded-lg border ${
+                            mensaje.tipo === 'success'
+                                ? 'bg-green-900 text-green-200 border-green-700'
+                                : 'bg-red-900 text-red-200 border-red-700'
+                        }`}>
+                            {mensaje.texto}
+                        </div>
+                    )}
+
+                    {gramatica && (
+                        <div className="bg-blue-900 border border-blue-700 rounded-lg p-4 mb-6">
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <h3 className="font-semibold text-blue-100 mb-2">Gramatica Actual: {gramatica.tipo}</h3>
+                                    <div className="text-sm text-blue-200 space-y-1">
+                                        <p><strong>No Terminales:</strong> {gramatica.no_terminales.join(', ')}</p>
+                                        <p><strong>Terminales:</strong> {gramatica.terminales.join(', ')}</p>
+                                        <p><strong>Simbolo Inicial:</strong> {gramatica.simbolo_inicial}</p>
+                                        <p><strong>Producciones:</strong></p>
+                                        <div className="ml-4 font-mono text-xs">
+                                            {Object.entries(gramatica.producciones).map(([nt, prods]) => (
+                                                <div key={nt}>{nt} → {prods.join(' | ')}</div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={eliminarGramatica}
+                                    className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                                >
+                                    Eliminar
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="bg-gray-800 rounded-lg shadow-2xl overflow-hidden border border-gray-700">
+                        <div className="flex border-b border-gray-700">
+                            <button
+                                onClick={() => setActiveTab('definir')}
+                                className={`flex-1 px-6 py-3 font-semibold transition-colors ${
+                                    activeTab === 'definir'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                }`}
+                            >
+                                Definir Gramatica
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('evaluar')}
+                                className={`flex-1 px-6 py-3 font-semibold transition-colors ${
+                                    activeTab === 'evaluar'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                }`}
+                            >
+                                Evaluar Cadena
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('generar')}
+                                className={`flex-1 px-6 py-3 font-semibold transition-colors ${
+                                    activeTab === 'generar'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                }`}
+                            >
+                                Generar Cadenas
+                            </button>
+                        </div>
+
+                        <div className="p-6">
+                            {activeTab === 'definir' && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                            No Terminales (separados por comas)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={noTerminales}
+                                            onChange={(e) => setNoTerminales(e.target.value)}
+                                            placeholder="S, A, B"
+                                            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-gray-400"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                            Terminales (separados por comas)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={terminales}
+                                            onChange={(e) => setTerminales(e.target.value)}
+                                            placeholder="a, b, 0, 1"
+                                            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-gray-400"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                            Simbolo Inicial
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={simboloInicial}
+                                            onChange={(e) => setSimbloInicial(e.target.value)}
+                                            placeholder="S"
+                                            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-gray-400"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                            Producciones (una por linea, o use | para alternativas)
+                                        </label>
+                                        <textarea
+                                            value={producciones}
+                                            onChange={(e) => setProducciones(e.target.value)}
+                                            placeholder="S -> aSa | bSb | ε"
+                                            rows="6"
+                                            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-white placeholder-gray-400"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                            Tipo de Gramatica
+                                        </label>
+                                        <select
+                                            value={tipo}
+                                            onChange={(e) => setTipo(e.target.value)}
+                                            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white"
+                                        >
+                                            <option value="Tipo 2">Tipo 2 (Libre de Contexto)</option>
+                                            <option value="Tipo 3">Tipo 3 (Regular)</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="flex gap-4 pt-4">
+                                        <button
+                                            onClick={definirGramatica}
+                                            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition-colors"
+                                        >
+                                            Definir Gramatica
+                                        </button>
+
+                                        <label className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold cursor-pointer transition-colors">
+                                            Cargar JSON
+                                            <input
+                                                type="file"
+                                                accept=".json"
+                                                onChange={cargarArchivo}
+                                                className="hidden"
+                                            />
+                                        </label>
+
+                                        <button
+                                            onClick={descargarGramatica}
+                                            disabled={!gramatica}
+                                            className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                            Descargar JSON
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'evaluar' && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-300 mb-2">
+                                            Cadena a Evaluar (use ε para cadena vacia)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={cadenaEvaluar}
+                                            onChange={(e) => setCadenaEvaluar(e.target.value)}
+                                            placeholder="aba"
+                                            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-white placeholder-gray-400"
+                                        />
+                                    </div>
+
+                                    <button
+                                        onClick={evaluarCadena}
+                                        disabled={!gramatica}
+                                        className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        Evaluar
+                                    </button>
+
+                                    {resultadoEvaluacion && (
+                                        <div className={`mt-6 p-6 rounded-lg border ${
+                                            resultadoEvaluacion.aceptada
+                                                ? 'bg-green-900 border-green-700'
+                                                : 'bg-red-900 border-red-700'
+                                        }`}>
+                                            <h3 className={`text-xl font-bold mb-4 ${
+                                                resultadoEvaluacion.aceptada ? 'text-green-200' : 'text-red-200'
+                                            }`}>
+                                                {resultadoEvaluacion.mensaje}
+                                            </h3>
+                                            <p className="text-gray-300 mb-4">
+                                                <strong>Cadena:</strong> <code className="bg-gray-800 px-2 py-1 rounded border border-gray-600">{resultadoEvaluacion.cadena}</code>
+                                            </p>
+
+                                            {resultadoEvaluacion.aceptada && resultadoEvaluacion.arbol_derivacion && (
+                                                <div>
+                                                    <h4 className="font-semibold text-gray-200 mb-3">Arbol de Derivacion:</h4>
+                                                    <div className="bg-gray-800 p-4 rounded border border-gray-600 overflow-x-auto">
+                                                        {renderArbol(resultadoEvaluacion.arbol_derivacion)}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeTab === 'generar' && (
+                                <div className="space-y-4">
+                                    <p className="text-gray-400 mb-4">
+                                        Genera las primeras 10 cadenas mas cortas del lenguaje usando busqueda en anchura (BFS)
+                                    </p>
+
+                                    <button
+                                        onClick={generarCadenas}
+                                        disabled={!gramatica}
+                                        className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        Generar Cadenas
+                                    </button>
+
+                                    {cadenasGeneradas && (
+                                        <div className="mt-6 p-6 bg-gray-700 rounded-lg border border-gray-600">
+                                            <h3 className="text-xl font-bold text-white mb-4">
+                                                Cadenas Generadas ({cadenasGeneradas.length})
+                                            </h3>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                {cadenasGeneradas.map((cadena, idx) => (
+                                                    <div key={idx} className="bg-gray-800 p-3 rounded border border-gray-600">
+                                                        <span className="text-gray-400 font-semibold">{idx + 1}.</span>
+                                                        <code className="ml-2 text-blue-400 font-mono">{cadena}</code>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    ReactDOM.render(<AnalizadorSintactico />, document.getElementById('root'));
+</script>
+</body>
+</html>
