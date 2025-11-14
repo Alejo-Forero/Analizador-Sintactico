@@ -38,11 +38,11 @@ proyecto/
 
 ### 1. Clonar o descargar el proyecto
 
-bash
-git clone 
-cd proyecto
+- bash
+- git clone 
+- cd proyecto
 
-### 3. Instalar dependencias
+### 2. Instalar dependencias
 
 pip install fastapi uvicorn python-multipart
 
