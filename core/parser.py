@@ -7,10 +7,11 @@ from models import Gramatica, ArbolDerivacion
 class Parser:
     def __init__(self, gramatica: Gramatica):
         self.gramatica = gramatica
+        self.max_profundidad = 100  # Límite de profundidad para evitar recursión infinita
 
     def parsear(self, cadena: str) -> Tuple[bool, Optional[ArbolDerivacion]]:
         """Determina si una cadena pertenece al lenguaje"""
-        resultado = self._parsear_simbolo(self.gramatica.S, cadena, 0)
+        resultado = self._parsear_simbolo(self.gramatica.S, cadena, 0, 0)
 
         # Buscar un resultado que consuma toda la cadena
         for arbol, pos_final in resultado:
@@ -19,11 +20,15 @@ class Parser:
 
         return False, None
 
-    def _parsear_simbolo(self, simbolo: str, cadena: str, pos: int) -> List[Tuple[ArbolDerivacion, int]]:
+    def _parsear_simbolo(self, simbolo: str, cadena: str, pos: int, profundidad: int) -> List[Tuple[ArbolDerivacion, int]]:
         """
         Parsea un símbolo desde la posición dada.
         Retorna una lista de tuplas (árbol, posición_final) con todas las posibles derivaciones.
         """
+        # Límite de profundidad para evitar recursión infinita
+        if profundidad > self.max_profundidad:
+            return []
+        
         resultados = []
 
         # Si el símbolo es epsilon
@@ -43,12 +48,12 @@ class Parser:
 
         # Probar cada producción del no terminal
         for produccion in self.gramatica.P[simbolo]:
-            for arbol, pos_final in self._parsear_produccion(simbolo, produccion, cadena, pos):
+            for arbol, pos_final in self._parsear_produccion(simbolo, produccion, cadena, pos, profundidad + 1):
                 resultados.append((arbol, pos_final))
 
         return resultados
 
-    def _parsear_produccion(self, no_terminal: str, produccion: str, cadena: str, pos: int) -> List[Tuple[ArbolDerivacion, int]]:
+    def _parsear_produccion(self, no_terminal: str, produccion: str, cadena: str, pos: int, profundidad: int) -> List[Tuple[ArbolDerivacion, int]]:
         """
         Intenta aplicar una producción específica.
         Retorna lista de tuplas (árbol, posición_final).
@@ -64,7 +69,7 @@ class Parser:
         simbolos = self._extraer_simbolos(produccion)
 
         # Parsear los símbolos secuencialmente con backtracking
-        resultados = self._parsear_secuencia(simbolos, cadena, pos)
+        resultados = self._parsear_secuencia(simbolos, cadena, pos, profundidad)
 
         # Construir el árbol para cada resultado válido
         arboles_finales = []
@@ -76,7 +81,7 @@ class Parser:
 
         return arboles_finales
 
-    def _parsear_secuencia(self, simbolos: List[str], cadena: str, pos: int) -> List[Tuple[List[ArbolDerivacion], int]]:
+    def _parsear_secuencia(self, simbolos: List[str], cadena: str, pos: int, profundidad: int) -> List[Tuple[List[ArbolDerivacion], int]]:
         """
         Parsea una secuencia de símbolos con backtracking.
         Retorna lista de tuplas (lista_de_arboles, posición_final).
@@ -90,9 +95,9 @@ class Parser:
         resultados = []
 
         # Parsear el primer símbolo
-        for arbol_primero, pos_intermedia in self._parsear_simbolo(primer_simbolo, cadena, pos):
+        for arbol_primero, pos_intermedia in self._parsear_simbolo(primer_simbolo, cadena, pos, profundidad):
             # Parsear el resto de la secuencia
-            for arboles_resto, pos_final in self._parsear_secuencia(resto_simbolos, cadena, pos_intermedia):
+            for arboles_resto, pos_final in self._parsear_secuencia(resto_simbolos, cadena, pos_intermedia, profundidad):
                 # Combinar resultados
                 resultados.append(([arbol_primero] + arboles_resto, pos_final))
 
@@ -101,12 +106,17 @@ class Parser:
     def _extraer_simbolos(self, produccion: str) -> List[str]:
         """
         Extrae los símbolos de una producción (terminales y no terminales).
-        Maneja símbolos multi-carácter correctamente.
+        Maneja símbolos multi-carácter correctamente e ignora espacios en blanco.
         """
         simbolos = []
         i = 0
 
         while i < len(produccion):
+            # Saltar espacios en blanco
+            if produccion[i].isspace():
+                i += 1
+                continue
+                
             simbolo_encontrado = None
 
             # Buscar no terminales (más largos primero)

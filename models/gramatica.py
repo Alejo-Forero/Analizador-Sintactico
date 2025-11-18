@@ -20,10 +20,33 @@ class Gramatica:
 
     @staticmethod
     def from_dict(data):
+        # Manejar dos formatos de producciones
+        producciones = data.get('producciones') or data.get('P')
+        
+        # Si las producciones están en formato de lista ["S -> L", "S -> L T"]
+        if isinstance(producciones, list):
+            producciones_dict = {}
+            for regla in producciones:
+                if '->' in regla:
+                    partes = regla.split('->')
+                    no_terminal = partes[0].strip()
+                    lado_derecho = partes[1].strip()
+                    
+                    if no_terminal not in producciones_dict:
+                        producciones_dict[no_terminal] = []
+                    producciones_dict[no_terminal].append(lado_derecho)
+            producciones = producciones_dict
+        
+        # Manejar diferentes nombres de campos en el JSON
+        no_terminales = set(data.get('no_terminales') or data.get('N', []))
+        terminales = set(data.get('terminales') or data.get('T', []))
+        simbolo_inicial = data.get('simbolo_inicial') or data.get('S')
+        tipo = str(data.get('tipo') or data.get('type', ''))
+        
         return Gramatica(
-            set(data['no_terminales']),
-            set(data['terminales']),
-            data['producciones'],
-            data['simbolo_inicial'],
-            data['tipo']
+            no_terminales,
+            terminales,
+            producciones,
+            simbolo_inicial,
+            tipo
         )
